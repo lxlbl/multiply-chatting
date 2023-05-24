@@ -1,0 +1,98 @@
+from threading import Thread
+import socket,time
+
+class Manager:#实现Manager类, 服务器，管理成员进入和离开聊天室，接收成员消息并广播
+    def __init__(self,socket,addr,username):
+        self.ip = addr[0]
+        self.port = addr[1]
+        self.username = username
+        self.soc=socket
+    #发消息
+    def sendMsg(self,msg,username):
+        try:
+            self.soc.send(("%s %s: %s" %(self.get_time(), username, msg)).encode("utf-8"))
+            return True
+        except:
+            return False
+    #收消息
+    def recv(self):
+        try:
+            data = self.soc.recv(1024)
+            msg=data.decode("utf-8")
+            if msg == "exit" or not msg:
+                return False
+            return msg
+        except:
+            return False  
+    def close(self):#关闭socket 
+        try:
+            self.soc.close()
+            return True
+        except:
+            return False
+    def get_id(self):#得到id
+        return "%s-%s" % (self.ip,self.port)
+    def get_time(self):#得到时间
+        return str(time.strftime("%Y-%m-%d %H:%M:%S"))
+
+def new_client(c):#主要的函数，实现接收信息和广播信息
+    try:
+        print("%s(%s) 尝试连接" %(c.ip,c.port))
+        file = open('log.txt','a')
+        file.write("%s(%s) 尝试连接\n" %(c.ip,c.port))#写入文件
+        data = c.recv()#接收用户名
+        if not data:
+            return
+        c.username = data
+        print("用户%s %s(%s)已连接" %(c.username,c.ip,c.port))
+        file.write("用户%s %s(%s)已连接\n" %(c.username,c.ip,c.port))
+        users[c.username] = f'{c.ip}-{c.port}'#将用户和ip地址加入字典
+        c.soc.send("已连接".encode("utf-8"))#说清楚已经连接
+        while True:
+            data = c.recv()
+            if not data:
+                break
+            elif data.split(' ')[0] =='@':# 定向转发
+                c.sendMsg(data,c.username)
+                clients[users[data.split(' ')[1]]].sendMsg(data,c.username)
+            else:
+                print("用户%s %s(%s) 发送了: %s" % (c.username,c.ip, c.port, data))
+                file.write("用户%s %s(%s) 发送了: %s\n" % (c.username,c.ip, c.port, data))
+                broadcast(data,c.username)
+    except Exception as e:
+        print("exception: %s" % str(e))
+    finally:
+        print("%s(%s) 断开连接" % (c.ip, c.port))
+        file.write("%s(%s) 断开连接\n" % (c.ip, c.port))
+        file.close()
+        c.close()
+        clients.pop(c.get_id())
+#广播信息
+def broadcast(msg,username):
+    for c in clients.values():
+        c.sendMsg(msg,username)
+
+def main(port=2023):
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    host = "127.0.0.1"
+    server.bind((host, port))
+
+    # 监听客户端
+    server.listen(10)
+    print("服务器已开启，正在监听{}".format(server.getsockname()))
+    #Manager类使用多线程服务多个用户
+    while True:
+        # 接受客户端连接
+        conn, addr = server.accept()
+        c = Manager(conn,addr,"")
+        clients[c.get_id()] = c
+        t = Thread(target=new_client, args=(c,))
+        t.start()
+
+if __name__ == "__main__":
+    users = {}
+    clients = {}
+    main()
+    print("服务器已关闭")
